@@ -17,7 +17,7 @@ from test_approval import POLICY, calls, executed, risky, safe
 
 
 def make_client(*script: AIMessage) -> TestClient:
-    async def factory() -> AgentRuntime:
+    async def factory(checkpointer=None) -> AgentRuntime:
         graph = build_agent([risky, safe], POLICY, model=ScriptedModel(script=list(script)))
         report = LoadReport(tools=[risky, safe], loaded={"demo": ["risky", "safe"]}, failed={"broken": "boom"})
         return AgentRuntime(graph=graph, policy=POLICY, tool_report=report)

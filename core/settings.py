@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     # ----- Web search -----
     tavily_api_key: SecretStr | None = None
+    admin_token: SecretStr | None = None
 
     # ----- Local paths -----
     chroma_persist_dir: Path = Path("chroma_db")

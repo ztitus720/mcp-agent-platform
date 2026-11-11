@@ -46,6 +46,7 @@ class LoadReport:
     tools: list[BaseTool] = field(default_factory=list)
     loaded: dict[str, list[str]] = field(default_factory=dict)   # server -> tool names
     failed: dict[str, str] = field(default_factory=dict)         # server -> reason
+    disabled: list[str] = field(default_factory=list)            # enabled: false in servers.yaml
 
 
 def _expand(value: object) -> str:
@@ -62,7 +63,9 @@ def read_server_specs(path: Path = SERVERS_FILE) -> list[ServerSpec]:
     specs: list[ServerSpec] = []
     for name, raw in servers.items():
         raw = raw or {}
-        if not _SERVER_NAME.match(str(name)):
+        if not isinstance(name, str):   # YAML reads bare yes/no/on/off/true as booleans
+            raise ValueError(f"Server name {name!r} is not text; quote it in servers.yaml")
+        if not _SERVER_NAME.match(name):
             raise ValueError(f"Invalid server name {name!r}: use lowercase letters, digits and '_'")
         if not raw.get("enabled", True):
             continue
@@ -97,11 +100,13 @@ async def _load_one(spec: ServerSpec) -> list[BaseTool]:
 async def load_mcp_tools(path: Path = SERVERS_FILE) -> LoadReport:
     """Load every enabled server in parallel. One failing server is reported, never fatal."""
     specs = read_server_specs(path)
+    enabled = {spec.name for spec in specs}
+    all_names = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("servers") or {}
     results = await asyncio.gather(
         *(asyncio.wait_for(_load_one(spec), LOAD_TIMEOUT_SECONDS) for spec in specs),
         return_exceptions=True,
     )
-    report = LoadReport()
+    report = LoadReport(disabled=[str(n) for n in all_names if str(n) not in enabled])
     for spec, result in zip(specs, results):
         if isinstance(result, BaseException):
             reason = f"{type(result).__name__}: {result}".strip().rstrip(":")[:300]

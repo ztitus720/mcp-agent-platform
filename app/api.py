@@ -5,6 +5,7 @@ Run from the project root:
 Endpoints:
     GET  /health         which MCP servers loaded / failed
     GET  /tools          tools the agent can use right now
+    POST /admin/reload   re-read servers.yaml + policy.yaml without restarting (X-Admin-Token)
     POST /chat           {"message", "thread_id"?}            -> SSE stream
     POST /chat/approve   {"thread_id", "decisions": [...]}    -> SSE stream (resumes a paused turn)
 SSE events: thread, token, tool_call, tool_result, approval_required, done, error.
@@ -13,18 +14,20 @@ SSE events: thread, token, tool_call, tool_result, approval_required, done, erro
 import asyncio
 import json
 import logging
+import secrets
 import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterable, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from pydantic import BaseModel, Field
 
 from app.agent import AgentRuntime, create_runtime
+from core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 THREAD_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
@@ -98,7 +101,10 @@ async def run_events(runtime: AgentRuntime, thread_id: str, graph_input) -> Asyn
         yield sse("error", {"type": type(exc).__name__, "message": str(exc)[:300]})
 
 
-def create_app(runtime_factory: Callable[[], Awaitable[AgentRuntime]] = create_runtime) -> FastAPI:
+RuntimeFactory = Callable[..., Awaitable[AgentRuntime]]   # called as factory(checkpointer=...)
+
+
+def create_app(runtime_factory: RuntimeFactory = create_runtime) -> FastAPI:
     """Build the app. Tests inject a factory that returns a runtime with a scripted model."""
 
     @asynccontextmanager
@@ -106,6 +112,7 @@ def create_app(runtime_factory: Callable[[], Awaitable[AgentRuntime]] = create_r
         # Tools are bound to the event loop they are loaded in: load them in the server's loop.
         app.state.runtime = await runtime_factory()
         app.state.locks = defaultdict(asyncio.Lock)
+        app.state.reload_lock = asyncio.Lock()
         yield
 
     app = FastAPI(title="MCP Agent Platform", lifespan=lifespan)
@@ -140,6 +147,36 @@ def create_app(runtime_factory: Callable[[], Awaitable[AgentRuntime]] = create_r
             raise HTTPException(400, f"Expected {len(pending)} decisions, got {len(body.decisions)}")
         decisions = [d.model_dump(exclude_none=True) for d in body.decisions]
         return rt, decisions, await claim(request, body.thread_id)
+
+    def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
+        """Admin endpoints are OFF unless ADMIN_TOKEN is set in .env, and then need that token."""
+        expected = get_settings().admin_token
+        if expected is None:
+            raise HTTPException(403, "Admin endpoints are disabled: set ADMIN_TOKEN in .env")
+        if not x_admin_token or not secrets.compare_digest(x_admin_token, expected.get_secret_value()):
+            raise HTTPException(401, "Missing or wrong X-Admin-Token")
+
+    @app.post("/admin/reload", dependencies=[Depends(require_admin)])
+    async def reload(request: Request) -> dict:
+        """Rebuild tools + policy from the config files. Running turns finish on the old runtime;
+        new requests use the new one. Conversations and paused approvals are kept (same checkpointer).
+        If the new configuration is broken, the old runtime stays in service."""
+        async with request.app.state.reload_lock:
+            old: AgentRuntime = request.app.state.runtime
+            try:
+                new = await runtime_factory(checkpointer=old.checkpointer)
+            except Exception as exc:
+                logger.exception("reload failed, keeping the current runtime")
+                raise HTTPException(422, f"Reload failed, nothing changed: {type(exc).__name__}: {exc}") from None
+            request.app.state.runtime = new
+        before = {t.name for t in old.tool_report.tools}
+        after = {t.name for t in new.tool_report.tools}
+        return {
+            "added_tools": sorted(after - before),
+            "removed_tools": sorted(before - after),
+            "servers_failed": new.tool_report.failed,
+            "high_risk_tools": list(new.policy.high_risk_tools),
+        }
 
     @app.get("/health")
     async def health(request: Request) -> dict:

@@ -79,6 +79,7 @@ class AgentRuntime:
     policy: AgentPolicy
     tool_report: LoadReport
     unknown_high_risk: list[str] = field(default_factory=list)
+    checkpointer: Any = None
 
     def run_config(self, thread_id: str) -> dict:
         """Per-request config: thread_id selects the conversation memory."""
@@ -100,16 +101,47 @@ class AgentRuntime:
         return Command(resume={"decisions": decisions})
 
 
-async def create_runtime() -> AgentRuntime:
-    """Load policy and MCP tools, then build the agent. Call once per process / event loop."""
+def check_high_risk_tools(policy: AgentPolicy, report: LoadReport) -> list[str]:
+    """Cross-check the approval list against what actually loaded.
+
+    A name whose server loaded fine but has no such tool, or whose prefix matches no configured
+    server, is a typo: refuse to start, because the tool would silently skip approval.
+    A name whose server failed to load or is disabled is only a warning: it cannot be called anyway.
+    """
+    loaded_tools = {tool.name for tool in report.tools}
+    configured = set(report.loaded) | set(report.failed) | set(report.disabled)
+    typos, unavailable = [], []
+    for name in policy.high_risk_tools:
+        if name in loaded_tools:
+            continue
+        server = next((s for s in configured if name.startswith(f"{s}_")), None)
+        if server in report.failed or server in report.disabled:
+            unavailable.append(name)
+        else:
+            typos.append(name)
+    if typos:
+        raise ValueError(
+            f"approval.high_risk_tools contains unknown tool names {typos}; "
+            f"loaded tools are {sorted(loaded_tools)}"
+        )
+    if unavailable:
+        logger.warning("high-risk tools unavailable (server failed or disabled): %s", unavailable)
+    return unavailable
+
+
+async def create_runtime(checkpointer: Any = None) -> AgentRuntime:
+    """Load policy and MCP tools, then build the agent. Call once per process / event loop.
+
+    Pass the previous runtime's checkpointer when reloading, so conversations and paused
+    approvals survive the reload.
+    """
     policy = load_policy()
     report = await load_mcp_tools()
     if not report.tools:
         raise RuntimeError(f"No MCP tools could be loaded: {report.failed}")
-    loaded = {tool.name for tool in report.tools}
-    unknown = [name for name in policy.high_risk_tools if name not in loaded]
-    if unknown:  # a typo here would silently disable approval for that tool
-        logger.warning("high_risk_tools not among loaded tools: %s", unknown)
-    graph = build_agent(report.tools, policy, fallback_model=get_fallback_model(),
+    unavailable = check_high_risk_tools(policy, report)
+    saver = checkpointer if checkpointer is not None else InMemorySaver()
+    graph = build_agent(report.tools, policy, checkpointer=saver, fallback_model=get_fallback_model(),
                         tool_log=ToolCallLog(get_settings().tool_log_path))
-    return AgentRuntime(graph=graph, policy=policy, tool_report=report, unknown_high_risk=unknown)
+    return AgentRuntime(graph=graph, policy=policy, tool_report=report,
+                        unknown_high_risk=unavailable, checkpointer=saver)
