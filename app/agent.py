@@ -13,9 +13,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 
-from app.llm import get_chat_model
+from app.llm import get_chat_model, get_fallback_model
 from app.mcp_client import LoadReport, load_mcp_tools
 from app.policy import AgentPolicy, load_policy
+from app.resilience import build_resilience_middleware
 
 
 def build_agent(
@@ -23,8 +24,9 @@ def build_agent(
     policy: AgentPolicy,
     model: BaseChatModel | None = None,
     checkpointer: Any = None,
+    fallback_model: BaseChatModel | None = None,
 ):
-    """Create the ReAct agent graph. `model` is injectable so tests can use a scripted model."""
+    """Create the ReAct agent graph. Models are injectable so tests can use scripted ones."""
     return create_agent(
         model=model or get_chat_model(),
         tools=tools,
@@ -34,6 +36,8 @@ def build_agent(
             ModelCallLimitMiddleware(run_limit=policy.max_model_calls, exit_behavior="end"),
             # Too many tool calls in one turn: refuse further calls, let the model answer.
             ToolCallLimitMiddleware(run_limit=policy.max_tool_calls, exit_behavior="continue"),
+            # Retries, timeouts and model fallback: failures degrade the answer, never crash.
+            *build_resilience_middleware(policy, fallback_model),
         ],
         checkpointer=checkpointer if checkpointer is not None else InMemorySaver(),
     )
@@ -61,4 +65,5 @@ async def create_runtime() -> AgentRuntime:
     report = await load_mcp_tools()
     if not report.tools:
         raise RuntimeError(f"No MCP tools could be loaded: {report.failed}")
-    return AgentRuntime(graph=build_agent(report.tools, policy), policy=policy, tool_report=report)
+    graph = build_agent(report.tools, policy, fallback_model=get_fallback_model())
+    return AgentRuntime(graph=graph, policy=policy, tool_report=report)

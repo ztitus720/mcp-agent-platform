@@ -17,4 +17,10 @@ agent:
       only what you can support. Never invent facts, numbers or sources.
     - Reply in the user's language, concisely.
 
-# Stage 6 adds: high-risk tools that need human approval, retry and fallback settings.
+resilience:
+  tool_timeout_seconds: 60          # a tool call that takes longer is aborted
+  tool_max_retries: 2               # retries for transport failures (server crashed / hung)
+  retry_initial_delay_seconds: 1.0  # exponential backoff with jitter starts here
+  # The fallback MODEL is chosen in .env (FALLBACK_MODEL_NAME): it is environment-specific.
+
+# Stage 6 step 2 adds: high-risk tools that need human approval.
