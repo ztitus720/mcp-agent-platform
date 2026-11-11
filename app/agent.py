@@ -23,6 +23,8 @@ from app.llm import get_chat_model, get_fallback_model
 from app.mcp_client import LoadReport, load_mcp_tools
 from app.policy import AgentPolicy, load_policy
 from app.resilience import build_resilience_middleware
+from app.tool_logger import AttemptCounterMiddleware, ToolCallLog, ToolLoggingMiddleware
+from core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 APPROVAL_DECISIONS = ["approve", "reject"]
@@ -44,6 +46,7 @@ def build_agent(
     model: BaseChatModel | None = None,
     checkpointer: Any = None,
     fallback_model: BaseChatModel | None = None,
+    tool_log: ToolCallLog | None = None,
 ):
     """Create the ReAct agent graph. Models are injectable so tests can use scripted ones."""
     return create_agent(
@@ -57,8 +60,12 @@ def build_agent(
             ModelCallLimitMiddleware(run_limit=policy.max_model_calls, exit_behavior="end"),
             # Too many tool calls in one turn: refuse further calls, let the model answer.
             ToolCallLimitMiddleware(run_limit=policy.max_tool_calls, exit_behavior="continue"),
+            # Outermost tool layer: one log line per call with its FINAL outcome and total time.
+            *([ToolLoggingMiddleware(tool_log)] if tool_log else []),
             # Retries, timeouts and model fallback: failures degrade the answer, never crash.
             *build_resilience_middleware(policy, fallback_model),
+            # Innermost tool layer: counts real executions (1 + retries) for the log line.
+            *([AttemptCounterMiddleware(tool_log)] if tool_log else []),
         ],
         checkpointer=checkpointer if checkpointer is not None else InMemorySaver(),
     )
@@ -103,5 +110,6 @@ async def create_runtime() -> AgentRuntime:
     unknown = [name for name in policy.high_risk_tools if name not in loaded]
     if unknown:  # a typo here would silently disable approval for that tool
         logger.warning("high_risk_tools not among loaded tools: %s", unknown)
-    graph = build_agent(report.tools, policy, fallback_model=get_fallback_model())
+    graph = build_agent(report.tools, policy, fallback_model=get_fallback_model(),
+                        tool_log=ToolCallLog(get_settings().tool_log_path))
     return AgentRuntime(graph=graph, policy=policy, tool_report=report, unknown_high_risk=unknown)
