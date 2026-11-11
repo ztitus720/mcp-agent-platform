@@ -20,3 +20,8 @@ servers:
     description: Live web search (Tavily; labelled mock when no key)
     command: ${PYTHON}
     args: ["-m", "servers.search_server"]
+
+  files:
+    description: Read and write text files in the sandboxed workspace/ folder
+    command: ${PYTHON}
+    args: ["-m", "servers.file_server"]

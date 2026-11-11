@@ -29,3 +29,5 @@ approval:
   high_risk_tools:
     # Sends the user's words to an external service (IT security policy, section 7).
     - search_web_search
+    # Changes data on disk.
+    - files_write_file

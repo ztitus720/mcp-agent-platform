@@ -59,11 +59,13 @@ def test_specs_reject_bad_config(tmp_path, body):
 
 @pytest.mark.anyio
 async def test_real_registry_loads_all_servers():
+    # Expectations come from servers.yaml itself, so adding a server needs no test edit.
+    expected = {spec.name for spec in read_server_specs()}
     report = await load_mcp_tools()
     assert report.failed == {}
-    assert set(report.loaded) == {"utility", "knowledge", "search"}
-    assert len(report.tools) == 6
-    assert all("_" in tool.name for tool in report.tools)        # every tool is prefixed
+    assert set(report.loaded) == expected
+    assert all(report.loaded[name] for name in expected)        # every server offers tools
+    assert all(tool.name.split("_", 1)[0] in expected for tool in report.tools)  # prefixed
 
 
 @pytest.mark.anyio

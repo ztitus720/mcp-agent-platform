@@ -14,6 +14,7 @@ __pycache__/
 # ===== Runtime data (regenerable) =====
 chroma_db/
 logs/
+workspace/
 
 # ===== Editor / OS files =====
 .vscode/
