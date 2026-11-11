@@ -1,0 +1,22 @@
+# ===== Python build artifacts =====
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ===== Virtual environment =====
+.venv/
+
+# ===== Secrets (never commit) =====
+.env
+.env.*
+!.env.example
+
+# ===== Runtime data (regenerable) =====
+chroma_db/
+logs/
+
+# ===== Editor / OS files =====
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

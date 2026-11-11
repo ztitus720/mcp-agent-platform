@@ -1,0 +1,25 @@
+# ===== Agent / LLM =====
+langchain[mcp]>=1.4.10,<2
+langchain-openai>=1,<2
+langgraph>=1.2,<2
+
+# ===== MCP servers (official SDK v2) =====
+mcp>=2.3,<3
+
+# ===== Knowledge base =====
+chromadb>=1,<2
+
+# ===== Web search =====
+tavily-python
+
+# ===== API layer =====
+fastapi
+uvicorn
+
+# ===== Config =====
+python-dotenv
+pydantic-settings>=2,<3
+pyyaml
+
+# ===== Tests =====
+pytest
