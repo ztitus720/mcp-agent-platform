@@ -39,17 +39,38 @@ def show(message) -> None:
         print(f"  <- {message.name} [{status}] {preview}")
 
 
-async def chat_turn(runtime: AgentRuntime, thread_id: str, user_text: str) -> None:
-    """Run one user turn and print each step as the graph produces it."""
+async def stream(runtime: AgentRuntime, thread_id: str, graph_input, seen: set[str]) -> None:
+    """Run the graph until it finishes or pauses, printing each new message once."""
     async for update in runtime.graph.astream(
-        {"messages": [("user", user_text)]},
-        runtime.run_config(thread_id),
-        stream_mode="updates",
+        graph_input, runtime.run_config(thread_id), stream_mode="updates"
     ):
         for node_output in update.values():
             if isinstance(node_output, dict):
                 for message in node_output.get("messages", []):
+                    if message.id and message.id in seen:   # re-emitted after an approval pause
+                        continue
+                    if message.id:
+                        seen.add(message.id)
                     show(message)
+
+
+async def ask_decision(request: dict) -> dict:
+    """Show one pending high-risk call; only an explicit 'y' approves (default = reject)."""
+    print(f"\n  [APPROVAL NEEDED] {request['name']}({request['args']})")
+    answer = (await asyncio.to_thread(input, "  approve? [y/N] ")).strip().lower()
+    if answer == "y":
+        return {"type": "approve"}
+    reason = (await asyncio.to_thread(input, "  reason for rejecting (optional): ")).strip()
+    return {"type": "reject", "message": reason or "Rejected by the user."}
+
+
+async def chat_turn(runtime: AgentRuntime, thread_id: str, user_text: str) -> None:
+    """One user turn, including any number of approval pauses."""
+    seen: set[str] = set()
+    await stream(runtime, thread_id, {"messages": [("user", user_text)]}, seen)
+    while pending := await runtime.pending_approvals(thread_id):
+        decisions = [await ask_decision(request) for request in pending]
+        await stream(runtime, thread_id, runtime.resume(decisions), seen)
 
 
 async def main() -> int:
@@ -59,6 +80,9 @@ async def main() -> int:
     print(f"{len(report.tools)} tools from {list(report.loaded)}")
     if report.failed:
         print(f"FAILED servers: {report.failed}")
+    print(f"Needs approval: {list(runtime.policy.high_risk_tools)}")
+    if runtime.unknown_high_risk:
+        print(f"WARNING: high_risk_tools not found among loaded tools: {runtime.unknown_high_risk}")
 
     thread_id = uuid.uuid4().hex[:8]
     print(f"Conversation {thread_id}. Commands: /new /tools /exit\n")

@@ -23,4 +23,9 @@ resilience:
   retry_initial_delay_seconds: 1.0  # exponential backoff with jitter starts here
   # The fallback MODEL is chosen in .env (FALLBACK_MODEL_NAME): it is environment-specific.
 
-# Stage 6 step 2 adds: high-risk tools that need human approval.
+approval:
+  # Full tool names (server prefix included). The agent pauses before each of these and waits
+  # for a human decision; anything other than an explicit approval counts as a rejection.
+  high_risk_tools:
+    # Sends the user's words to an external service (IT security policy, section 7).
+    - search_web_search

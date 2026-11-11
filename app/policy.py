@@ -20,6 +20,7 @@ class AgentPolicy:
     tool_timeout_seconds: float = 60.0
     tool_max_retries: int = 2
     retry_initial_delay_seconds: float = 1.0
+    high_risk_tools: tuple[str, ...] = ()
 
 
 def load_policy(path: Path = POLICY_FILE) -> AgentPolicy:
@@ -27,6 +28,10 @@ def load_policy(path: Path = POLICY_FILE) -> AgentPolicy:
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     agent = data.get("agent") or {}
     resilience = data.get("resilience") or {}
+    approval = data.get("approval") or {}
+    high_risk = approval.get("high_risk_tools") or []
+    if not isinstance(high_risk, list) or not all(isinstance(n, str) and n for n in high_risk):
+        raise ValueError(f"{path}: approval.high_risk_tools must be a list of tool names")
     try:
         policy = AgentPolicy(
             max_model_calls=int(agent["max_model_calls"]),
@@ -36,6 +41,7 @@ def load_policy(path: Path = POLICY_FILE) -> AgentPolicy:
             tool_timeout_seconds=float(resilience["tool_timeout_seconds"]),
             tool_max_retries=int(resilience["tool_max_retries"]),
             retry_initial_delay_seconds=float(resilience["retry_initial_delay_seconds"]),
+            high_risk_tools=tuple(high_risk),
         )
     except KeyError as missing:
         raise ValueError(f"{path}: setting {missing.args[0]!r} is required") from None
