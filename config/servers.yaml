@@ -1,0 +1,22 @@
+# MCP server registry.
+# Adding or changing tools = editing this file (plus the server code). Agent code never changes.
+#   ${PYTHON}       -> the interpreter running the app (the .venv python)
+#   ${PROJECT_ROOT} -> the repository root (default working directory of every server)
+# Each server name becomes the prefix of its tools, e.g. utility -> utility_calculate.
+# Optional keys per server: enabled (default true), cwd, env, description.
+
+servers:
+  utility:
+    description: Calculator and current date/time
+    command: ${PYTHON}
+    args: ["-m", "servers.utility_server"]
+
+  knowledge:
+    description: Xinghe Tech internal policy documents (Chroma + Bailian embedding)
+    command: ${PYTHON}
+    args: ["-m", "servers.knowledge_server"]
+
+  search:
+    description: Live web search (Tavily; labelled mock when no key)
+    command: ${PYTHON}
+    args: ["-m", "servers.search_server"]

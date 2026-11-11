@@ -23,3 +23,5 @@ pyyaml
 
 # ===== Tests =====
 pytest
+# ===== MCP client (used directly by app/mcp_client.py) =====
+fastmcp>=4.1,<5
