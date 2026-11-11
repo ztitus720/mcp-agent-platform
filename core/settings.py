@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     api_key: SecretStr
     base_url: str
     llm_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    llm_extra_body: dict = Field(default_factory=dict)
 
     # ----- Embedding -----
     embedding_provider: Literal["openai_compatible", "local"] = "openai_compatible"

@@ -6,6 +6,7 @@ from core.embeddings, so documents and queries live in the same vector space.
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
+from chromadb.errors import NotFoundError
 
 from core.embeddings import Embedder
 from core.settings import get_settings
@@ -32,7 +33,7 @@ def recreate_collection(embedder: Embedder):
     client = _client()
     try:
         client.delete_collection(settings.chroma_collection)
-    except Exception:  # the collection does not exist yet; error type differs across versions
+    except NotFoundError:  # first run: nothing to delete
         pass
     return client.create_collection(
         name=settings.chroma_collection,
@@ -46,10 +47,11 @@ def open_collection(embedder: Embedder):
     settings = get_settings()
     try:
         collection = _client().get_collection(settings.chroma_collection)
-    except Exception:
+    except NotFoundError:  # only a genuinely missing index is reported as "not found";
         raise IndexNotReadyError(
             "Knowledge index not found. Build it with: python -m scripts.ingest"
         ) from None
+    # any other error (e.g. the store is briefly locked by another process) propagates as-is
 
     stored = (collection.metadata or {}).get(SIGNATURE_KEY)
     if stored != embedder.signature:

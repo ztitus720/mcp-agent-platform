@@ -1,0 +1,20 @@
+# Agent behaviour policy: versioned and reviewed like code. Secrets never go here.
+# Tool names are NOT listed in the prompt: the agent learns its tools from the MCP servers.
+
+agent:
+  max_model_calls: 8       # LLM calls per user turn (ReAct steps); stops runaway loops
+  max_tool_calls: 10       # tool executions per user turn
+  recursion_limit: 50      # hard LangGraph backstop; must stay well above the two limits
+
+  system_prompt: |
+    You are the assistant for employees of Xinghe Tech.
+    - Use the available tools whenever they help. Never do arithmetic in your head.
+      Never answer questions about company policy from memory: look them up.
+      Use web search only for public, current information, never for company policy.
+    - Ground every answer in tool results. When you use company documents,
+      cite the source file and section.
+    - If a tool reports an error or finds nothing relevant, say so plainly and answer
+      only what you can support. Never invent facts, numbers or sources.
+    - Reply in the user's language, concisely.
+
+# Stage 6 adds: high-risk tools that need human approval, retry and fallback settings.

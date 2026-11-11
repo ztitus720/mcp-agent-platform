@@ -7,6 +7,7 @@ Never print() to stdout in this file: stdout is the MCP wire. Log to stderr inst
 """
 
 import logging
+import time
 from pathlib import Path
 
 from mcp.server import MCPServer
@@ -30,6 +31,8 @@ DOCS_DIR = (PROJECT_ROOT / "data" / "docs").resolve()  # same folder scripts/ing
 MAX_TOP_K = 8
 MIN_SIMILARITY = 0.40        # passages below this are treated as irrelevant; calibrated in stage 2
 MAX_DOCUMENT_CHARS = 20_000
+STORE_ATTEMPTS = 3            # parallel tool calls = parallel server processes on one store
+STORE_BACKOFF_SECONDS = 0.5
 
 # ---------------------------------------------------------------------------
 # Plain logic (testable without MCP)
@@ -52,6 +55,26 @@ def doc_title(path: Path) -> str:
     return path.stem
 
 
+def _query_store(embedder, vector: list[float], top_k: int) -> dict:
+    """Open the index and run one nearest-neighbour query, retrying transient store errors."""
+    for attempt in range(1, STORE_ATTEMPTS + 1):
+        try:
+            collection = open_collection(embedder)          # checks the embedding signature
+            return collection.query(
+                query_embeddings=[vector],
+                n_results=top_k,
+                include=["documents", "metadatas", "distances"],
+            )
+        except IndexNotReadyError:
+            raise                                           # permanent: retrying cannot help
+        except Exception as exc:                            # e.g. store briefly locked
+            logger.warning("store attempt %d/%d failed: %r", attempt, STORE_ATTEMPTS, exc)
+            if attempt == STORE_ATTEMPTS:
+                raise
+            time.sleep(STORE_BACKOFF_SECONDS * attempt)
+    raise AssertionError("unreachable")
+
+
 def search(query: str, top_k: int) -> list[dict]:
     """Embed the query and return the top_k nearest chunks with a similarity score."""
     query = query.strip()
@@ -61,15 +84,11 @@ def search(query: str, top_k: int) -> list[dict]:
         raise ToolError(f"top_k must be between 1 and {MAX_TOP_K}.")
     try:
         embedder = get_embedder()
-        collection = open_collection(embedder)          # checks the embedding signature
-        raw = collection.query(
-            query_embeddings=[embedder.embed_query(query)],
-            n_results=top_k,
-            include=["documents", "metadatas", "distances"],
-        )
+        vector = embedder.embed_query(query)               # the client already retries network errors
+        raw = _query_store(embedder, vector, top_k)
     except IndexNotReadyError as exc:
         raise ToolError(str(exc)) from None
-    except Exception as exc:  # network, quota, Chroma errors: report, never crash the server
+    except Exception as exc:  # network, quota, store errors: report the real type, never crash
         logger.exception("knowledge search failed")
         raise ToolError(
             f"Knowledge search is temporarily unavailable ({type(exc).__name__}). Try again later."
