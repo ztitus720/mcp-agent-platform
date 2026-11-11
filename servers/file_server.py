@@ -6,6 +6,7 @@ config/servers.yaml and one line in config/policy.yaml (write needs approval).
 Never print() to stdout in this file: stdout is the MCP wire.
 """
 
+import os
 from pathlib import Path
 
 from mcp.server import MCPServer
@@ -18,7 +19,8 @@ mcp = MCPServer(
     instructions="Read and write text files inside the sandboxed workspace/ folder only.",
 )
 
-WORKSPACE_DIR = (PROJECT_ROOT / "workspace").resolve()
+# Overridable through the server's env in servers.yaml, e.g. to give evaluations an empty sandbox.
+WORKSPACE_DIR = Path(os.environ.get("WORKSPACE_DIR") or PROJECT_ROOT / "workspace").resolve()
 ALLOWED_SUFFIXES = {".txt", ".md", ".json", ".csv"}
 MAX_READ_CHARS = 20_000
 MAX_WRITE_CHARS = 100_000

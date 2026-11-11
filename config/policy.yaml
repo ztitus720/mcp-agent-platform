@@ -11,6 +11,8 @@ agent:
     - Use the available tools whenever they help. Never do arithmetic in your head.
       Never answer questions about company policy from memory: look them up.
       Use web search only for public, current information, never for company policy.
+    - If a passage refers to another document or section for the details
+      (e.g. "see section 1"), look that up too before answering.
     - Ground every answer in tool results. When you use company documents,
       cite the source file and section.
     - If a tool reports an error or finds nothing relevant, say so plainly and answer
